@@ -2,8 +2,12 @@ package project;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import project.exceptions.DataException;
 
 import java.io.*;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.nio.ByteBuffer;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -13,31 +17,29 @@ public class TestProject {
 
     private final String BIN_PATH = "src/main/java/project/binFiles/";
     private final String JSON_PATH = "src/main/java/project/jsonFiles/";
+    File jsonFile = null;
 
-    public void createJsonFile(String binFile, String jsonFile) throws IOException {
-        InputStream inputStream = new FileInputStream(BIN_PATH + binFile + (binFile.contains(".bin") ? "" : ".bin"));
-        File test = new File(JSON_PATH + jsonFile + (jsonFile.contains(".json") ? "" : ".json"));
-        FileWriter writer = new FileWriter(test);
+    public void createJsonFile(String binFileName, String jsonFileName) throws IOException {
+        InputStream inputStream = null;
+        jsonFile = new File(JSON_PATH + jsonFileName + (jsonFileName.contains(".json") ? "" : ".json"));
+        FileWriter writer = new FileWriter(jsonFile);
         try {
-            test.createNewFile();
-            try {
-                byte[] file = inputStream.readAllBytes();
-                JSONObject root = new JSONObject();
-                split(file, root);
-                writer.write(root.toString());
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-        finally {
-            inputStream.close();
+            inputStream = new FileInputStream(BIN_PATH + binFileName + (binFileName.contains(".bin") ? "" : ".bin"));
+            byte[] file = inputStream.readAllBytes();
+            JSONObject root = new JSONObject();
+            split(file, root);
+            writer.write(root.toString());
+        } catch (IOException | DataException e) {
+            writer.close();
+            deleteFile();
+        } finally {
+            if (inputStream != null)
+                inputStream.close();
             writer.close();
         }
     }
 
-    private void split(byte[] file, JSONObject jsonObject) throws UnsupportedEncodingException {
+    private void split(byte[] file, JSONObject jsonObject) throws DataException {
         int step = -1;
         while (true) {
             try {
@@ -47,19 +49,25 @@ public class TestProject {
                 switch (type) {
                     case 1: {
                         if (value.length <= 4) {
-                            jsonObject.put("dateTime", dateFormatter(value));
-                        } else throw new ArrayIndexOutOfBoundsException("incorrect data file");
+                            jsonObject.put("dateTime", formatDate(value));
+                        } else {
+                            throw new DataException("incorrect data file");
+                        }
                         break;
                     }
                     case 2:
                         if (value.length <= 8) {
-                            jsonObject.put("orderNumber", numberDecoder(value));
-                        } else throw new ArrayIndexOutOfBoundsException("incorrect data file");
+                            jsonObject.put("orderNumber", decodeNumber(value));
+                        } else {
+                            throw new DataException("incorrect data file");
+                        }
                         break;
                     case 3:
                         if (value.length <= 1000) {
-                            jsonObject.put("customerNumber", stringDecoder(value));
-                        } else throw new ArrayIndexOutOfBoundsException("incorrect data file");
+                            jsonObject.put("customerNumber", decodeString(value));
+                        } else {
+                            throw new DataException("incorrect data file");
+                        }
                         break;
                     case 4:
                         JSONObject itemElement = new JSONObject();
@@ -73,23 +81,31 @@ public class TestProject {
                         break;
                     case 11:
                         if (value.length <= 200) {
-                            jsonObject.put("name", stringDecoder(value));
-                        } else throw new ArrayIndexOutOfBoundsException("incorrect data file");
+                            jsonObject.put("name", decodeString(value));
+                        } else {
+                            throw new DataException("incorrect data file");
+                        }
                         break;
                     case 12:
                         if (value.length <= 6) {
-                            jsonObject.put("price", numberDecoder(value));
-                        } else throw new ArrayIndexOutOfBoundsException("incorrect data file");
+                            jsonObject.put("price", decodeNumber(value));
+                        } else {
+                            throw new DataException("incorrect data file");
+                        }
                         break;
                     case 13:
                         if (value.length <= 8) {
-                            jsonObject.put("quantity", floatingPointerNumberDecoder(value));
-                        } else throw new ArrayIndexOutOfBoundsException("incorrect data file");
+                            jsonObject.put("quantity", decodeFloatingPointerNumber(value));
+                        } else {
+                            throw new DataException("incorrect data file");
+                        }
                         break;
                     case 14:
                         if (value.length <= 6) {
-                            jsonObject.put("sum", numberDecoder(value));
-                        } else throw new ArrayIndexOutOfBoundsException("incorrect data file");
+                            jsonObject.put("sum", decodeNumber(value));
+                        } else {
+                            throw new DataException("incorrect data file");
+                        }
                         break;
                     default:
                         break;
@@ -100,43 +116,45 @@ public class TestProject {
         }
     }
 
-    private long numberDecoder(byte[] value) {
-        if (value.length <= 6) {
-            long result = 0;
-            for (int i = 0; i < value.length; i++) {
-                result += ((long) value[i] & 0xFF) << (8 * i);
-            }
-            return result;
-        } else try {
-            throw new Throwable("incorrect data file");
-        } catch (Throwable e) {
-            e.printStackTrace();
-            return 0;
+    private long decodeNumber(byte[] value) {
+        long result = 0;
+        for (int i = 0; i < value.length; i++) {
+            result += ((long) value[i] & 0xFF) << (8 * i);
         }
+        return result;
     }
 
-    private String dateFormatter(byte[] value) {
+    private String formatDate(byte[] value) throws DataException {
         if (value.length <= 4) {
             DateFormat date = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
             date.setTimeZone(TimeZone.getTimeZone("UTC"));
-            return date.format(numberDecoder(value) * 1000);
-        } else try {
-            throw new Throwable("incorrect data file");
-        } catch (Throwable e) {
-            e.printStackTrace();
+            return date.format(decodeNumber(value) * 1000);
+        } else {
+            throw new DataException("incorrect data file");
+        }
+    }
+
+    private String decodeString(byte[] value) {
+        try {
+            return new String(value, "Cp866");
+        } catch (UnsupportedEncodingException e) {
             return "";
         }
     }
 
-    private String stringDecoder(byte[] value) throws UnsupportedEncodingException {
-        return new String(value, "Cp866");
-    }
-
-    private float floatingPointerNumberDecoder(byte[] value) {
+    private BigDecimal decodeFloatingPointerNumber(byte[] value) {
         float result = 0;
         for (int i = 1; i < value.length; i++) {
             result += (value[i] & 0xff) << (8 * (i - 1));
         }
-        return result;
+        if (value.length >= 5) {
+            byte[] valueRange = Arrays.copyOfRange(value, 1, value.length);
+            result = ByteBuffer.wrap(valueRange).getFloat();
+        }
+        return BigDecimal.valueOf(result).setScale(value[0], RoundingMode.HALF_EVEN);
+    }
+
+    private void deleteFile() {
+        jsonFile.delete();
     }
 }
